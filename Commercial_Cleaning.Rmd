@@ -1,0 +1,154 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Import libraries
+```{r, message=FALSE}
+library(readr)
+library(dplyr)
+library(emojifont)
+library(rtweet)
+library(twitteR)
+library(qdap)
+library(tm)
+library(plyr)
+library(tidyr)
+library(tidytext)
+library(text2vec)
+library(readtext)
+library(Hmisc)
+library(lubridate)
+library(stringr)
+library(text2vec)
+library(wordcloud)
+library(RWeka)
+```
+
+Read in twitter data
+```{r, message=FALSE}
+cols = c('user_id', 'status_id', 'created_at', 'screen_name', 'text', 'source', 'location', 'description', 'verified', 'account_lang', 'terms')
+
+tweets1 <- read_csv("twitter_1_of_2_final.csv")[,cols]
+tweets2 <- read_csv("twitter_2_of_2_final.csv")[,cols]
+```
+
+Merge the files 
+```{r}
+tweets_df <- rbind(tweets1, tweets2)
+```
+
+Convert Dates
+```{r}
+tweets_df <- separate(tweets_df, created_at, c("Date", "Time"), sep = ' ')
+tweets_df$Date <- trimws(tweets_df$Date)
+```
+
+Create day column for filtering
+```{r}
+tweets_df[,'Day'] <- day(tweets_df$Date)
+```
+
+
+```{r}
+tweets_df$text <- iconv(tweets_df$text, from = "UTF-8", to = "ASCII", sub = "")
+```
+
+Remove hyperlinks
+```{r}
+tweets_df$stripped_text <- gsub("http.*","",  tweets_df$text)
+tweets_df$stripped_text <- gsub("https.*","", tweets_df$stripped_text)
+```
+
+Remove reference to other usernames
+```{r}
+tweets_df$stripped_text <- str_replace_all(tweets_df$stripped_text,"@[a-z,A-Z]*","")
+```
+
+Look for terms in stripped text column
+```{r}
+# terms to look for to make sure I have relevant tweets
+terms_x <- c('anheuser-busch', 'budweiser','budwiser','budlight','stella artois','bon & viv','bon and viv','bon + viv','bon+viv','bon&viv','bonandviv','michelob ultra','michelob','yellow tail')
+
+# convert tweets to lower case
+tweets_df$stripped_text <- sapply(tweets_df$stripped_text, tolower)
+
+# create new columns for each term
+for (i in terms_x) {
+  col <- i
+  tweets_df[,col] <- grepl(i, tweets_df$stripped_text)
+}
+
+# sum up term columns
+tweets_df[,'num_terms'] <- tweets_df$'anheuser-busch' + tweets_df$budweiser + tweets_df$budwiser + tweets_df$budlight + 
+  tweets_df$`stella artois` + tweets_df$`bon & viv` + tweets_df$`bon and viv` + tweets_df$`bon + viv` + 
+  tweets_df$`bon+viv` + tweets_df$`bon&viv` + tweets_df$bonandviv + tweets_df$`michelob ultra` + tweets_df$michelob + 
+  tweets_df$`yellow tail`
+
+# only use rows with only one term mentioned
+tweets_df2 <- tweets_df[tweets_df['num_terms'] == 1,]
+```
+
+Users to remove
+```{r}
+remove = c('maulsworld','OllieTheVegan', '247usedcars', 'TheCars17',
+           'Autotestdrivers', 'uscarsforsale','WeBuyCarsOhio', '11AliveNews', 'Little_Man4', ' Zamzam_Auto_Co',
+           'AudiSD858', 'luxcartuning', 'speedcafe', 'Flyin18T', 'AutoRepairTechs', 'MercTrucks', 'AnalyticaGlobal',
+           'SportsCarGlobal', 'UKClassicCars', 'Aktrading', 'RiverviewToyota', 'schristakos', 'Newturbos', 'Carscoop',
+           'roadshow', 'TruckPlantSales','eagleautosng', 'findniceitem', 'realcheapcars', 'rabbetmitors', 'HelloTeamTrump','autonewssiite', 'therealautoblog',
+           'BandM_Auto', 'rarecars', 'USClassicAutos', 'carsdotcom', 'DAFTrucksOnline', 'DailyHealthIn', 'AutoTimesNews', '4x4community', 'nyc_car_sale', 
+           'Stella_Basham1', 'Racecars_bot', 'carsandprinters', 'FlyAirNZ', 'Truck_Trailers', 'eCarsOnline', 'rontierHyundai', 'HGVInsureQuotes',
+           'LiveF1News', 'Run_Mercedes', 'Speed_News_', 'AllJobsUT', 'Autopten ', 'Car_Guy_CO', 'InstalFixJobsUT', 'ewcovenantms', 'watchtvshows24',
+           'Naijautotraders', 'AutoTrader_Cy', 'cbsnewspath', 'all_newsonline1', 'boxingblogs', 'gensets_online', 'Lakers_newsnow', 'NetworkCbs',
+           'PetryMotorsprts', 'portsRadioWNML', 'autohub_nigeria', 'buy_an_ipad', 'GreatBabyItem', 'JA_Autos', 'Zamzam_Auto_Co', 'minchy_trading','ijerebi',
+           'ATLSportsNut_19','Reported_NYC','poandpo','NickRhimself','mark_bizzelle','PadenTyrel', 'HonorThem','cdo_NET','adage', 'FalconsBirdLady',
+           'drewstearne','EmfiSecurities','LuxuryBuysToday','EsaStatusUpdate')
+
+tweets_df2[,"term_found_users"] <- tweets_df2$screen_name %in% remove
+tweets_df4 <- tweets_df2[tweets_df2['term_found_users'] != TRUE,]
+  
+official_brands = c('Toyota', 'Budweiser', 'budlightlv', 'budlight',
+                    'StellaArtois', 'BONandVIV', 'MichelobULTRA',
+                    'yellowtailwine', 'Kia', 'Hyundai',
+                    'Hyundai_UK', 'Hyundai_Global', 'MercedesBenzUSA',
+                    'MercedesBenz', 'MercedesAMG', 'AudiOfficial',
+                    'Audi','budweiserusa','bunsinbusan')
+
+tweets_df4[,"term_found_brands"] <- tweets_df3$screen_name %in% official_brands
+tweets_df4 <- tweets_df3[tweets_df3['term_found_brands'] != TRUE,]
+```
+
+Further clean the data
+```{r}
+tweets_df4[,"stripped_text"] <- tolower(tweets_df4$stripped_text)
+tweets_df4[,"stripped_text"] <- removePunctuation(tweets_df4$stripped_text)
+tweets_df4[,"stripped_text"] <- removeNumbers(tweets_df4$stripped_text)
+tweets_df4[,"stripped_text"] <- stripWhitespace(tweets_df4$stripped_text)
+tweets_df4[,"stripped_text"] <- rm_url(tweets_df4$stripped_text)
+tweets_df4[,"stripped_text"] <- rm_twitter_url(tweets_df4$stripped_text)
+```
+
+Filter for only Beer Related Text
+```{r}
+terms_beer <- c("\"budweiser\"","\"budwiser\"","\"budlight\"","\"stella\"","\"stella artois\"","\"bon & viv\"","\"bon and viv\"","\"bon + viv\"","\"bon+viv\"","\"bon&viv\"","\"bonandviv\"","\"michelob ultra\"","\"michelob\"","\"yellow tail\"")
+
+tweets_df4[,"terms_beer"] <- tweets_df4$terms %in% terms_beer
+
+final_tweets <- tweets_df4[tweets_df4["terms_beer"] == TRUE,]
+```
+
+Write data to a csv
+```{r}
+write.csv(final_tweets, "DATA_4_SHINY.csv")
+```
+
+
+
+
+
+
+
